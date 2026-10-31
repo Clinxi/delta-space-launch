@@ -5,6 +5,7 @@
   let state = null, serverOffset = 0, timeAnchor = 0, perfAnchor = 0, nodes = [], lastTick = '', lastVersion = -1;
   let joinBase = '', rotation = 0, lastRotation = performance.now(), source, audio, soundOn = false, previousPhase = null;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const viewport = $('stageViewport');
   let viewW = innerWidth, viewH = innerHeight, toolsTimer, avatarBaseSize = 50;
   function toast(message) { $('notice').textContent = message; $('notice').style.display = 'block'; setTimeout(() => $('notice').style.display = 'none', 4500); }
   function showTools() { document.body.classList.add('tools-visible'); clearTimeout(toolsTimer); toolsTimer = setTimeout(() => document.body.classList.remove('tools-visible'), 2600); }
@@ -75,6 +76,7 @@
     document.title = 'DELTA SPACE · ' + state.settings.title;
     if (!old || old.eventId !== state.eventId || old.settings.publicUrl !== state.settings.publicUrl) updateQR();
     renderAvatars();
+    layoutJoinPanel();
   }
   function connect() {
     source = new EventSource('/api/events');
@@ -122,7 +124,37 @@
     if (phase === 'waiting' && state.participantCount > MAX_VISIBLE && ts-lastRotation > 12000) { rotation=(rotation+60)%state.participantCount; lastRotation=ts; renderAvatars(); }
   }
   const canvas = $('stars'), ctx = canvas.getContext('2d'); let stars=[];
-  function resize() { viewW=innerWidth; viewH=innerHeight; if(nodes.length) avatarBaseSize=parseFloat(getComputedStyle(nodes[0].el).width)||50; const ratio=Math.min(devicePixelRatio||1,2); canvas.width=viewW*ratio; canvas.height=viewH*ratio; ctx.setTransform(ratio,0,0,ratio,0,0); stars=Array.from({length:45},()=>({x:Math.random()*viewW,y:Math.random()*viewH,r:Math.random()*1.4+.4,p:Math.random()*6.28})); }
+  function layoutJoinPanel() {
+    if (!state || innerWidth <= 800) return;
+    const panel = document.querySelector('.join-panel');
+    const copy = document.querySelector('.event-copy');
+    const footer = document.querySelector('.stage-footer');
+    const size = state.settings.stageQrSize ?? 26;
+    viewport.style.setProperty('--stage-qr-size', size);
+    // Keep the enlarged square and its copy clear of the title and screen edge.
+    const minTop = copy.offsetTop + copy.offsetHeight + 24;
+    const maxBottom = footer.offsetTop - 28;
+    const maxSize = Math.max(100, maxBottom - minTop - 34);
+    viewport.style.setProperty('--stage-qr-size', Math.min(size, maxSize / viewH * 100));
+    const maxTop = Math.max(minTop, maxBottom - panel.offsetHeight);
+    panel.style.top = Math.max(minTop, Math.min(maxTop, viewH * (state.settings.stageQrTop ?? 54) / 100)) + 'px';
+  }
+  function resize() {
+    const mobile = innerWidth <= 800;
+    // Use one design coordinate system for CSS, avatars and animation. Every
+    // element scales together when the window moves to a different display.
+    viewW = mobile ? innerWidth : 1920;
+    viewH = mobile ? innerHeight : Math.max(800, Math.min(1440, viewW * innerHeight / innerWidth));
+    const scale = Math.min(innerWidth / viewW, innerHeight / viewH);
+    viewport.style.width = viewW + 'px'; viewport.style.height = viewH + 'px';
+    viewport.style.setProperty('--stage-scale', scale);
+    if (mobile) document.querySelector('.join-panel').style.removeProperty('top');
+    layoutJoinPanel();
+    if(nodes.length) avatarBaseSize=parseFloat(getComputedStyle(nodes[0].el).width)||50;
+    const ratio=Math.min((devicePixelRatio||1)*scale,2);
+    canvas.width=viewW*ratio; canvas.height=viewH*ratio; ctx.setTransform(ratio,0,0,ratio,0,0);
+    stars=Array.from({length:45},()=>({x:Math.random()*viewW,y:Math.random()*viewH,r:Math.random()*1.4+.4,p:Math.random()*6.28}));
+  }
   let starFrame=0; function drawStars(ts) {requestAnimationFrame(drawStars);if(ts-starFrame<100)return;starFrame=ts;ctx.clearRect(0,0,viewW,viewH);ctx.fillStyle='#bfdcff';for(const s of stars){ctx.globalAlpha=.10+(.5+.5*Math.sin(s.p+(reducedMotion?0:ts*.00025)))*.13;ctx.beginPath();ctx.arc(s.x,s.y,s.r*.6,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
   addEventListener('resize',resize); resize(); requestAnimationFrame(drawStars); requestAnimationFrame(frame);
   setInterval(()=>{$('clock').textContent=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(Date.now()+serverOffset);},1000);

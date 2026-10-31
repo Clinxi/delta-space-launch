@@ -11,6 +11,7 @@ let busy = false;
 let serverOffset = 0;
 let toastTimer;
 let previousEvent;
+let displayDraft = null, displaySaving = false, displayTimer;
 const isDemoGuest = (person) => person.isDemo === true;
 const settingsInputs = ['title', 'subtitle', 'launch-text', 'countdown-seconds', 'theme', 'public-url'];
 
@@ -78,6 +79,50 @@ function fillSettings() {
   formDirty = false;
   $('save-state').textContent = '已与现场同步';
 }
+function renderDisplay() {
+  if (!state) return;
+  const values = displayDraft || state.settings;
+  $('stage-qr-size').value = values.stageQrSize ?? 26;
+  $('stage-qr-top').value = values.stageQrTop ?? 54;
+  $('stage-qr-size-value').value = $('stage-qr-size').value + '%';
+  $('stage-qr-top-value').value = $('stage-qr-top').value + '%';
+}
+async function saveDisplay() {
+  if (!displayDraft || displaySaving || !authenticated) return;
+  const submitted = displayDraft;
+  displaySaving = true;
+  $('display-save-state').textContent = '正在同步到大屏…';
+  $('display-retry').hidden = true;
+  try {
+    const next = await request('/api/admin/display', submitted);
+    if (!state || next.version >= state.version) state = next;
+    if (displayDraft === submitted) {
+      displayDraft = null;
+      $('display-save-state').textContent = '已与大屏同步';
+      renderDisplay();
+    }
+  } catch (error) {
+    if (error.status === 401) setAuthenticated(false);
+    $('display-save-state').textContent = '同步失败，请重试';
+    $('display-retry').hidden = false;
+    toast(error.message, true);
+  } finally {
+    displaySaving = false;
+    if (displayDraft && displayDraft !== submitted) saveDisplay();
+  }
+}
+function queueDisplay() {
+  displayDraft = { stageQrSize: Number($('stage-qr-size').value), stageQrTop: Number($('stage-qr-top').value) };
+  renderDisplay();
+  $('display-save-state').textContent = '等待同步…';
+  clearTimeout(displayTimer);
+  displayTimer = setTimeout(saveDisplay, 200);
+}
+for (const id of ['stage-qr-size', 'stage-qr-top']) $(id).addEventListener('input', queueDisplay);
+$('display-reset').addEventListener('click', () => {
+  $('stage-qr-size').value = 26; $('stage-qr-top').value = 54; queueDisplay();
+});
+$('display-retry').addEventListener('click', saveDisplay);
 async function refreshInfo() {
   if (!authenticated) return;
   try {
@@ -152,6 +197,7 @@ function render() {
   $('duration').textContent = state.settings.countdownSeconds;
   $('preview-title').textContent = state.settings.title;
   $('preview-subtitle').textContent = state.settings.subtitle;
+  renderDisplay();
   if (!formInitialized || (!formDirty && !document.activeElement?.closest('#settings-form'))) fillSettings();
   renderPhase();
   renderButtons();
@@ -202,6 +248,11 @@ $('copy-join').addEventListener('click', async () => {
   if (!info) return;
   try { await copyText(info.joinUrl); toast('参与链接已复制'); } catch (error) { toast(error.message, true); }
 });
+$('open-stage').addEventListener('click', (event) => {
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const stage = window.open($('open-stage').href, 'launch-stage', 'popup=yes,width=1440,height=900');
+  if (stage) { stage.opener = null; event.preventDefault(); }
+});
 $('launch-button').addEventListener('click', async () => {
   if (!state || state.phase !== 'waiting') return;
   const demos = state.participants.filter(isDemoGuest).length;
@@ -248,7 +299,7 @@ $('settings-form').addEventListener('submit', async (event) => {
 });
 $('search-guests').addEventListener('input', renderGuests);
 window.addEventListener('beforeunload', (event) => {
-  if (authenticated && formDirty) { event.preventDefault(); event.returnValue = ''; }
+  if (authenticated && (formDirty || displayDraft)) { event.preventDefault(); event.returnValue = ''; }
 });
 
 try {

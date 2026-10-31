@@ -10,7 +10,8 @@ import { networkInterfaces } from 'node:os';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SETTINGS = {
   title: 'DELTA SPACE', subtitle: 'DELTA SPACE 启动日活动',
-  launchText: '正式启动', theme: 'aurora', publicUrl: '', countdownSeconds: 5, logoUrl: ''
+  launchText: '正式启动', theme: 'aurora', publicUrl: '', countdownSeconds: 5, logoUrl: '',
+  stageQrSize: 26, stageQrTop: 54
 };
 const hash = value => createHash('sha256').update(String(value)).digest();
 const equalSecret = (left, right) => timingSafeEqual(hash(left), hash(right));
@@ -264,6 +265,15 @@ export function createApp(options = {}) {
   app.get('/api/info',(_req,res)=>{
     const base=envPublicUrl || state.settings.publicUrl || localAddresses(port)[0] || `http://localhost:${port}`;
     res.json({joinUrl:`${base}/join.html?event=${state.eventId}`,stageUrl:`${base}/stage.html`});
+  });
+  app.post('/api/admin/display',(req,res)=>{
+    const { stageQrSize, stageQrTop } = req.body || {};
+    if (!Number.isInteger(stageQrSize) || stageQrSize < 18 || stageQrSize > 34
+      || !Number.isInteger(stageQrTop) || stageQrTop < 38 || stageQrTop > 66) {
+      throw fail(400, '二维码大小需为 18–34%，顶部位置需为 38–66%');
+    }
+    state.settings = { ...state.settings, stageQrSize, stageQrTop };
+    commit(); res.json(snapshot());
   });
   app.post('/api/admin/settings',(req,res)=>{
     mustWait();

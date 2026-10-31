@@ -85,6 +85,38 @@ test('SSE delivers initial state and live join updates',async t=>{
   controller.abort();await reader.cancel().catch(()=>{});
 });
 
+test('display adjustments require login, broadcast, persist and preserve the ceremony',async t=>{
+  let app=await boot();const dir=app.dataDir;
+  t.after(()=>app.close());
+  assert.equal(app.instance.snapshot().settings.stageQrSize,26);
+  assert.equal(app.instance.snapshot().settings.stageQrTop,54);
+  assert.equal((await app.request('/api/admin/display',{stageQrSize:30,stageQrTop:48})).status,401);
+  const cookie=await app.login();
+  for (const invalid of [{stageQrSize:35,stageQrTop:48},{stageQrSize:26,stageQrTop:37},{stageQrSize:'26',stageQrTop:54},{}]) {
+    assert.equal((await app.request('/api/admin/display',invalid,cookie)).status,400);
+  }
+  const before=app.instance.snapshot();
+  const controller=new AbortController();
+  const stream=await fetch(app.base+'/api/events',{signal:controller.signal});
+  const reader=stream.body.getReader();await reader.read();
+  const response=await app.request('/api/admin/display',{stageQrSize:30,stageQrTop:48},cookie);
+  assert.equal(response.status,200);
+  const changed=new TextDecoder().decode((await reader.read()).value);
+  assert.match(changed,/"stageQrSize":30/);assert.match(changed,/"stageQrTop":48/);
+  controller.abort();await reader.cancel().catch(()=>{});
+  const after=await response.json();
+  assert.equal(after.eventId,before.eventId);assert.equal(after.phase,before.phase);
+  assert.deepEqual(after.participants,before.participants);
+  assert.equal(after.settings.title,before.settings.title);
+  await app.close(false);app=await boot({dataDir:dir});
+  assert.equal(app.instance.snapshot().settings.stageQrSize,30);
+  assert.equal(app.instance.snapshot().settings.stageQrTop,48);
+  const resumedCookie=await app.login();
+  await app.request('/api/admin/launch',{},resumedCookie);
+  assert.equal((await app.request('/api/admin/display',{stageQrSize:26,stageQrTop:54},resumedCookie)).status,200);
+  assert.equal(app.instance.snapshot().phase,'countdown');
+});
+
 test('countdown is server-owned, closes joining, survives restart and can reset',async t=>{
   let app=await boot();const dir=app.dataDir;
   t.after(()=>app.close());
@@ -206,7 +238,7 @@ test('brand migration updates complete historical defaults and preserves custom 
       writeFileSync(join(dir,'state.json'),JSON.stringify(fixture));
       instance=createApp({dataDir:dir,adminPassword:password});
       const saved=JSON.parse(readFileSync(join(dir,'state.json'),'utf8'));
-      assert.deepEqual(saved.settings,{...(customizedKey?copy:newCopy),...extras});
+      assert.deepEqual(saved.settings,{...(customizedKey?copy:newCopy),...extras,stageQrSize:26,stageQrTop:54});
       assert.deepEqual(saved.participants,participants);
       assert.equal(readFileSync(join(dir,'uploads/existing-avatar.svg'),'utf8'),oldAvatar);
       assert.equal(saved.eventId,fixture.eventId);assert.equal(saved.version,7);
